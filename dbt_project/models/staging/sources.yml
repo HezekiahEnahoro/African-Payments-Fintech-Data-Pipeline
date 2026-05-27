@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: raw
+    database: payments_db
+    schema: raw
+    tables:
+      - name: transactions
+        description: Raw payment transaction events
+        columns:
+          - name: id
+            tests: [unique, not_null]
+          - name: merchant_id
+            tests: [not_null]
+          - name: amount
+            tests: [not_null]
+          - name: status
+            tests:
+              - accepted_values:
+                  values: ['success', 'failed', 'pending', 'reversed']
+
+      - name: merchants
+        description: Merchant accounts
+        columns:
+          - name: id
+            tests: [unique, not_null]
+
+      - name: customers
+        columns:
+          - name: id
+            tests: [unique, not_null]
+
+      - name: fx_rates
+        description: Daily FX rates vs NGN
+        columns:
+          - name: rate
+            tests: [not_null]
+
+      - name: chargebacks
+        columns:
+          - name: id
+            tests: [unique, not_null]
+
+      - name: settlements
+        columns:
+          - name: id
+            tests: [unique, not_null]

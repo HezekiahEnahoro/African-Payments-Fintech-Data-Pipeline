@@ -1,0 +1,22 @@
+african_payments:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: payments
+      password: payments123
+      dbname: payments_db
+      schema: analytics
+      threads: 4
+
+    prod:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'postgres-payments') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
+      user: "{{ env_var('POSTGRES_USER') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      dbname: "{{ env_var('POSTGRES_DB') }}"
+      schema: analytics
+      threads: 4
