@@ -25,6 +25,9 @@ airflow.db
 data/
 /tmp/
 
+# Local only
+linkedin.txt
+
 # OS
 .DS_Store
 Thumbs.db

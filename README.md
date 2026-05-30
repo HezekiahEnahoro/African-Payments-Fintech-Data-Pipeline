@@ -27,6 +27,8 @@ PostgreSQL analytics_analytics schema
   fct_transactions · fct_settlements · dim_merchants (SCD Type 2)
 ```
 
+![DAG](assets/dag.png)
+
 ---
 
 ## Stack
