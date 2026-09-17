@@ -45,6 +45,22 @@ def generate_merchants(n: int = 200) -> list[dict]:
     return merchants
 
 
+def mutate_merchant(merchant: dict) -> dict:
+    """Apply one realistic 'life event' to an existing merchant: a tier change
+    or an active/inactive flip. Keeps the same id — this is what gives dim_merchants
+    something real to detect a new version of."""
+    mutated = dict(merchant)
+
+    if random.random() < 0.5:
+        current_tier = mutated["tier"]
+        mutated["tier"] = random.choice([t for t in (1, 2, 3) if t != current_tier])
+    else:
+        mutated["is_active"] = not mutated["is_active"]
+
+    mutated["updated_at"] = datetime.utcnow()
+    return mutated
+
+
 if __name__ == "__main__":
     merchants = generate_merchants(5)
     for m in merchants:

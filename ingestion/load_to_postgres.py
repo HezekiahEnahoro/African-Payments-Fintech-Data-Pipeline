@@ -16,6 +16,34 @@ def get_connection():
     return psycopg2.connect(**DB_CONFIG)
 
 
+def get_existing_merchant_ids() -> list[str]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM raw.merchants")
+            return [row[0] for row in cur.fetchall()]
+
+
+def get_existing_merchants() -> list[dict]:
+    """Full merchant rows (not just ids) — needed to mutate a merchant's
+    tier/is_active while keeping its other attributes intact."""
+    sql = """
+        SELECT id, name, business_type, country, city, settlement_bank,
+               settlement_account, tier, is_active, created_at, updated_at
+        FROM raw.merchants
+    """
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql)
+            return [dict(row) for row in cur.fetchall()]
+
+
+def get_existing_customer_ids() -> list[str]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM raw.customers")
+            return [row[0] for row in cur.fetchall()]
+
+
 def upsert_merchants(merchants: list[dict]) -> int:
     sql = """
         INSERT INTO raw.merchants

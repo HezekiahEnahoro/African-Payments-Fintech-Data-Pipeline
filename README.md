@@ -6,25 +6,18 @@ A production-grade batch data pipeline simulating a Paystack/Flutterwave-style p
 
 ## Architecture
 
-```
-Data Sources (Python generators)
-  └── Transactions · Merchants · FX Rates · Chargebacks · Settlements
-        │
-        ▼
-Apache Airflow  (daily orchestration @ 01:00 UTC)
-        │
-   ┌────┴────┐
-   ▼         ▼
-PostgreSQL  AWS S3
-(raw schema) (Parquet, date-partitioned)
-   │
-   ▼
-dbt transformations
-  staging → marts
-   │
-   ▼
-PostgreSQL analytics_analytics schema
-  fct_transactions · fct_settlements · dim_merchants (SCD Type 2)
+```mermaid
+flowchart TD
+    A["Data Generators<br/>Python + Faker"] --> B["Apache Airflow<br/>daily @ 01:00 UTC"]
+    B --> C[("PostgreSQL<br/>raw schema")]
+    B --> D[("AWS S3<br/>Parquet, date-partitioned")]
+    C --> E["dbt: staging"]
+    E --> F["dbt: snapshot"]
+    F --> G["dbt: marts"]
+    G --> H[("PostgreSQL<br/>analytics_analytics schema")]
+    H --> I["fct_transactions"]
+    H --> J["fct_settlements"]
+    H --> K["dim_merchants (SCD Type 2)"]
 ```
 
 ![DAG](assets/dag.png)
@@ -60,7 +53,9 @@ Simulates the core data flows of an African fintech payments processor:
 ## Key Engineering Concepts
 
 ### SCD Type 2 on dim_merchants
-When a merchant changes tier or business status, a new history record is created rather than overwriting the existing one. Each record carries `effective_from`, `effective_to`, and `is_current` flags — the standard pattern for slowly changing dimensions. Row changes are detected using an `md5()` hash of key attributes.
+`dim_merchants` is built on a dbt snapshot (`merchants_snapshot`) that watches `raw.merchants` for changes to tier, active status, business type, name, and city using a `check` strategy. When a merchant changes, the snapshot closes out the previous version (`effective_to`) and inserts a new one, with `is_current` flagging the latest — the standard pattern for slowly changing dimensions.
+
+This only produces real history because the daily data generator reuses existing merchant IDs across runs (rather than minting a brand-new, disconnected set of fake merchants every day) and deliberately mutates a small subset — a tier change or an active/inactive flip — each run, giving the snapshot an actual change to detect.
 
 ### Date-partitioned S3 storage
 All raw data is written as Parquet with Snappy compression under the path:
@@ -102,6 +97,7 @@ To run dbt transformations locally:
 ```bash
 cd dbt_project
 dbt deps --profiles-dir . --target dev
+dbt snapshot --profiles-dir . --target dev
 dbt run --profiles-dir . --target dev
 dbt test --profiles-dir . --target dev
 ```

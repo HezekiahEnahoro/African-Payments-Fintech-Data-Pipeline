@@ -28,26 +28,46 @@ dag = DAG(
 
 
 def run_data_generation(**context):
-    from data_generator.generate_merchants import generate_merchants
+    from data_generator.generate_merchants import generate_merchants, mutate_merchant
     from data_generator.generate_transactions import generate_transaction, generate_customer
     from data_generator.generate_supporting import (
         generate_fx_rates, generate_chargebacks, generate_settlements
     )
+    from ingestion.load_to_postgres import (
+        get_existing_merchant_ids, get_existing_merchants, get_existing_customer_ids
+    )
     import random
 
-    print("Generating merchants...")
-    merchants = generate_merchants(200)
-    merchant_ids = [m["id"] for m in merchants]
+    print("Checking for an existing merchant/customer pool...")
+    existing_merchant_ids = get_existing_merchant_ids()
+    existing_customer_ids = get_existing_customer_ids()
 
-    print("Generating customers...")
-    customers = [generate_customer() for _ in range(1000)]
-    customer_ids = [c["id"] for c in customers]
+    if not existing_merchant_ids:
+        print("No existing merchants found — cold start, generating an initial pool.")
+        new_merchants = generate_merchants(200)
+        mutated_merchants = []
+    else:
+        print(f"Found {len(existing_merchant_ids)} existing merchants — reusing the pool.")
+        new_merchants = generate_merchants(random.randint(5, 10))
+
+        existing_merchants = get_existing_merchants()
+        sample_size = max(1, int(len(existing_merchants) * 0.05))
+        to_mutate = random.sample(existing_merchants, sample_size)
+        mutated_merchants = [mutate_merchant(m) for m in to_mutate]
+
+    new_customers = [
+        generate_customer() for _ in range(1000 if not existing_customer_ids else 50)
+    ]
+
+    merchants_to_upsert = new_merchants + mutated_merchants
+    all_merchant_ids = existing_merchant_ids + [m["id"] for m in new_merchants]
+    all_customer_ids = existing_customer_ids + [c["id"] for c in new_customers]
 
     print("Generating transactions...")
     transactions = [
         generate_transaction(
-            merchant_id=random.choice(merchant_ids),
-            customer_id=random.choice(customer_ids)
+            merchant_id=random.choice(all_merchant_ids),
+            customer_id=random.choice(all_customer_ids)
         )
         for _ in range(5000)
     ]
@@ -55,17 +75,17 @@ def run_data_generation(**context):
     print("Generating FX rates, chargebacks, settlements...")
     fx_rates    = generate_fx_rates(days_back=7)
     chargebacks = generate_chargebacks(transactions)
-    settlements = generate_settlements(merchant_ids, transactions)
+    settlements = generate_settlements(all_merchant_ids, transactions)
 
-    context["ti"].xcom_push(key="merchant_count",     value=len(merchants))
+    context["ti"].xcom_push(key="merchant_count",     value=len(merchants_to_upsert))
     context["ti"].xcom_push(key="transaction_count",  value=len(transactions))
     context["ti"].xcom_push(key="chargeback_count",   value=len(chargebacks))
     context["ti"].xcom_push(key="settlement_count",   value=len(settlements))
 
     import json, re
     run_data = {
-        "merchants": merchants,
-        "customers": customers,
+        "merchants": merchants_to_upsert,
+        "customers": new_customers,
         "transactions": transactions,
         "fx_rates": fx_rates,
         "chargebacks": chargebacks,
@@ -77,7 +97,11 @@ def run_data_generation(**context):
         json.dump(run_data, f, default=str)
     context["ti"].xcom_push(key="tmp_path", value=tmp_path)
 
-    print(f"Data generation complete. Merchants: {len(merchants)}, Transactions: {len(transactions)}")
+    print(
+        f"Data generation complete. Merchants written: {len(merchants_to_upsert)} "
+        f"({len(new_merchants)} new, {len(mutated_merchants)} mutated). "
+        f"Transactions: {len(transactions)}"
+    )
 
 
 def run_postgres_ingestion(**context):
@@ -145,7 +169,7 @@ def run_s3_upload(**context):
         print("S3 upload complete:", results)
     except Exception as e:
         error_msg = str(e)
-        if "NoSuchBucket" in error_msg or "NoCredentialProviders" in error_msg or "InvalidClientTokenId" in error_msg:
+        if "NoSuchBucket" in error_msg or "NoCredentialProviders" in error_msg or "InvalidClientTokenId" in error_msg or "InvalidAccessKeyId" in error_msg:
             raise AirflowSkipException(f"S3 not available ({error_msg}) — skipping S3 upload.")
         raise
 
@@ -165,6 +189,16 @@ ingest_postgres_task = PythonOperator(
 upload_s3_task = PythonOperator(
     task_id="upload_to_s3",
     python_callable=run_s3_upload,
+    dag=dag,
+)
+
+run_dbt_snapshot_task = BashOperator(
+    task_id="run_dbt_snapshot",
+    bash_command=(
+        "cd /opt/airflow/dbt_project && "
+        "dbt deps --profiles-dir /opt/airflow/dbt_project --target prod && "
+        "dbt snapshot --profiles-dir /opt/airflow/dbt_project --target prod"
+    ),
     dag=dag,
 )
 
@@ -188,4 +222,4 @@ run_dbt_tests_task = BashOperator(
 )
 
 generate_task >> [ingest_postgres_task, upload_s3_task]
-ingest_postgres_task >> run_dbt_task >> run_dbt_tests_task
+ingest_postgres_task >> run_dbt_snapshot_task >> run_dbt_task >> run_dbt_tests_task
