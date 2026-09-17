@@ -20,7 +20,7 @@ flowchart TD
     H --> K["dim_merchants (SCD Type 2)"]
 ```
 
-![DAG](assets/dag.png)
+![DAG](assets/airflow_dag.png)
 
 ---
 
